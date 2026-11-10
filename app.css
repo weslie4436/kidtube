@@ -277,7 +277,13 @@ main { flex: 1; min-width: 0; margin-left: var(--guide); }
   padding: 8px 24px 48px;
 }
 
-.card { min-width: 0; }
+.card {
+  min-width: 0;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 300px;
+}
+
+.feed-more { height: 1px; }
 
 .thumb {
   position: relative;

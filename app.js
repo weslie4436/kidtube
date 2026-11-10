@@ -546,13 +546,20 @@ function renderChips(route) {
   return row;
 }
 
-function renderCard(video) {
+function posterUrl(id, sharp) {
+  return `https://i.ytimg.com/vi/${id}/${sharp ? "hqdefault" : "mqdefault"}.jpg`;
+}
+
+function renderCard(video, eager) {
   const card = document.createElement("article");
   card.className = "card";
   const thumb = link(pageHref(video), "thumb");
   const image = document.createElement("img");
   image.alt = "";
-  image.src = video.thumbnail || `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`;
+  image.decoding = "async";
+  image.loading = eager ? "eager" : "lazy";
+  if (eager) image.fetchPriority = "high";
+  image.src = posterUrl(video.id, !!eager);
   thumb.append(image);
   if (video.duration) {
     const time = document.createElement("span");
@@ -598,11 +605,45 @@ function renderChannelHit(channel) {
   return row;
 }
 
+let feedWatch = null;
+
+function stopFeed() {
+  if (!feedWatch) return;
+  feedWatch.disconnect();
+  feedWatch = null;
+}
+
 function renderGrid(list) {
+  stopFeed();
   const grid = document.createElement("div");
   grid.className = "grid";
-  for (const video of list) grid.append(renderCard(video));
-  return grid;
+  const first = Math.min(list.length, 8);
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < first; i += 1) frag.append(renderCard(list[i], true));
+  grid.append(frag);
+  let shown = first;
+  function more(count) {
+    if (!grid.isConnected || shown >= list.length) return false;
+    const end = Math.min(list.length, shown + count);
+    const batch = document.createDocumentFragment();
+    for (let i = shown; i < end; i += 1) batch.append(renderCard(list[i], false));
+    grid.append(batch);
+    shown = end;
+    return shown < list.length;
+  }
+  const sentinel = document.createElement("div");
+  sentinel.className = "feed-more";
+  const wrap = document.createDocumentFragment();
+  wrap.append(grid, sentinel);
+  requestAnimationFrame(() => {
+    if (!more(8)) return;
+    feedWatch = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      if (!more(12) && feedWatch) feedWatch.disconnect();
+    }, { rootMargin: "900px" });
+    feedWatch.observe(sentinel);
+  });
+  return wrap;
 }
 
 function empty(message) {
@@ -661,6 +702,7 @@ function renderWatch(video) {
 
 function render() {
   const route = parseRoute();
+  stopFeed();
   destroyPlayer();
   renderGuide(route);
   renderTabs(route);
@@ -796,28 +838,28 @@ function fitHeight() {
   if (height > 0) document.documentElement.style.setProperty("--vvh", height + "px");
 }
 
-function refitStandalone() {
+function pinViewport() {
   fitHeight();
   const standalone = window.navigator.standalone === true
     || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
   if (!standalone) return;
   const meta = document.querySelector('meta[name="viewport"]');
-  if (!meta) return;
-  meta.content = "width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover";
-  window.setTimeout(() => {
-    const width = Math.round(window.innerWidth || document.documentElement.clientWidth || 0);
-    if (!width) return;
-    meta.content = "width=" + width + ", initial-scale=1, maximum-scale=1, viewport-fit=cover";
-    fitHeight();
-  }, 80);
+  const vv = window.visualViewport;
+  const width = Math.round((vv && vv.width) || window.innerWidth || 0);
+  if (!meta || !width) return;
+  const next = "width=" + width + ", initial-scale=1, maximum-scale=1, viewport-fit=cover";
+  if (meta.content !== next) meta.content = next;
 }
 
 document.addEventListener("gesturestart", (event) => event.preventDefault());
 window.addEventListener("resize", fitHeight);
-window.addEventListener("orientationchange", refitStandalone);
-window.addEventListener("pageshow", refitStandalone);
-if (window.visualViewport) window.visualViewport.addEventListener("resize", fitHeight);
-fitHeight();
+window.addEventListener("orientationchange", () => {
+  pinViewport();
+  requestAnimationFrame(pinViewport);
+});
+window.addEventListener("pageshow", pinViewport);
+if (window.visualViewport) window.visualViewport.addEventListener("resize", pinViewport);
+pinViewport();
 
 fetch("catalog.json?v=4", { cache: "no-cache" })
   .then((res) => {
