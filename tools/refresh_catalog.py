@@ -11,6 +11,7 @@ import argparse
 import json
 import re
 import urllib.request
+from urllib.parse import quote, urlsplit, urlunsplit
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,14 @@ MEDIA = "http://search.yahoo.com/mrss/"
 
 
 def fetch(url: str) -> bytes:
+    parts = urlsplit(url)
+    url = urlunsplit((
+        parts.scheme,
+        parts.netloc,
+        quote(parts.path, safe="/%"),
+        quote(parts.query, safe="=&%"),
+        "",
+    ))
     req = urllib.request.Request(
         url,
         headers={
@@ -284,6 +293,32 @@ def stamp(videos: list[dict], list_id: str, channel_id: str = "") -> list[dict]:
     return stamped
 
 
+def looks_like_count(name: str) -> bool:
+    text = re.sub(r"[\s,次觀看views]+", "", name or "", flags=re.I)
+    return bool(re.fullmatch(r"\d+(?:\.\d+)?[萬千kmb]?", text, flags=re.I))
+
+
+def repair_names(videos: list[dict]) -> list[dict]:
+    best: dict[str, tuple[str, int]] = {}
+    counts: dict[tuple[str, str], int] = {}
+    for video in videos:
+        channel_id = video.get("channelId") or ""
+        name = video.get("channel") or ""
+        if not channel_id or looks_like_count(name):
+            continue
+        key = (channel_id, name)
+        counts[key] = counts.get(key, 0) + 1
+    for (channel_id, name), count in counts.items():
+        if count > best.get(channel_id, ("", 0))[1]:
+            best[channel_id] = (name, count)
+    for video in videos:
+        channel_id = video.get("channelId") or ""
+        chosen = best.get(channel_id)
+        if chosen and looks_like_count(video.get("channel") or ""):
+            video["channel"] = chosen[0]
+    return videos
+
+
 def dedupe(videos: list[dict]) -> list[dict]:
     seen = set()
     unique = []
@@ -344,7 +379,7 @@ def main() -> int:
     else:
         title = ""
 
-    videos = dedupe(videos)
+    videos = repair_names(dedupe(videos))
     if not videos:
         print("no videos read; catalog left unchanged")
         return 0

@@ -488,7 +488,7 @@ searchForm.addEventListener("submit", (event) => {
 });
 window.addEventListener("hashchange", render);
 
-fetch("catalog.json?v=3", { cache: "no-cache" })
+fetch("catalog.json?v=4", { cache: "no-cache" })
   .then((res) => {
     if (!res.ok) throw new Error(String(res.status));
     return res.json();
