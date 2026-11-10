@@ -9,5 +9,4 @@ alwaysApply: true
 
 - 門面：https://weslie4436.github.io/kidtube/
 - 不提交 Google 密碼、OAuth、API 金鑰
-- 不把播放器嵌回這個網站（嵌入播放器用不到 Premium、iOS 上會出現廣告）
-- 點影片必須開 `https://www.youtube.com/watch?v=&list=`
+- 點影片留在本站 `#/watch/`，嵌入播放器，右邊只列白名單。不要改回打開 `youtube.com/watch` 的推薦頁。

@@ -1,6 +1,6 @@
 # KidTube
 
-小孩打開的目錄，長得像 YouTube。裡面只有放行的頻道。點一部影片，會打開這台裝置上已經登入的 YouTube，所以 Premium 的免廣告才用得上。
+小孩打開的目錄，長得像 YouTube。裡面只有放行的頻道。點一部影片會留在這個網站裡播，右邊只列出白名單裡的下一部，不會進 YouTube 那個帶推薦的觀看頁。嵌入的播放器不一定吃得到 Premium，所以廣告有時還會出現。
 
 網址：https://weslie4436.github.io/kidtube/
 

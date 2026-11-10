@@ -11,6 +11,7 @@ let catalog = { playlistId: "", title: "", videos: [] };
 
 function parseRoute() {
   const raw = decodeURIComponent((location.hash || "#/").replace(/^#/, ""));
+  if (raw.startsWith("/watch/")) return { name: "watch", id: raw.slice("/watch/".length) };
   if (raw.startsWith("/channel/")) return { name: "channel", id: raw.slice("/channel/".length) };
   if (raw.startsWith("/results/")) return { name: "results", q: raw.slice("/results/".length) };
   if (raw === "/channels") return { name: "channels" };
@@ -36,15 +37,65 @@ function channels() {
   return [...map.values()];
 }
 
-function watchUrl(video) {
-  const url = new URL("https://www.youtube.com/watch");
-  url.searchParams.set("v", video.id);
-  const list = video.list || catalog.playlistId;
-  if (list) {
-    url.searchParams.set("list", list);
-    if (video.index) url.searchParams.set("index", String(video.index));
+function pageHref(video) {
+  return "#/watch/" + encodeURIComponent(video.id);
+}
+
+function queueAfter(video) {
+  const sameKey = video.channelId || video.channel;
+  const same = videos().filter((item) => (item.channelId || item.channel) === sameKey && item.id !== video.id);
+  const after = same.filter((item) => (item.index || 0) > (video.index || 0));
+  const before = same.filter((item) => (item.index || 0) <= (video.index || 0));
+  const others = videos().filter((item) => (item.channelId || item.channel) !== sameKey);
+  return [...after, ...before, ...others];
+}
+
+let player = null;
+let playerToken = 0;
+
+function destroyPlayer() {
+  playerToken += 1;
+  if (!player) return;
+  try { player.destroy(); } catch (error) { /* already gone */ }
+  player = null;
+}
+
+function ensureApi() {
+  if (window.YT && window.YT.Player) return Promise.resolve();
+  if (!window.__ytApi) {
+    window.__ytApi = new Promise((resolve) => {
+      const tag = document.createElement("script");
+      tag.src = "https://www.youtube.com/iframe_api";
+      window.onYouTubeIframeAPIReady = () => resolve();
+      document.head.append(tag);
+    });
   }
-  return url.toString();
+  return window.__ytApi;
+}
+
+function mountPlayer(video) {
+  const token = ++playerToken;
+  ensureApi().then(() => {
+    if (token !== playerToken || !document.getElementById("yt-player")) return;
+    player = new YT.Player("yt-player", {
+      videoId: video.id,
+      host: "https://www.youtube.com",
+      playerVars: {
+        rel: 0,
+        modestbranding: 1,
+        playsinline: 1,
+        origin: location.origin,
+        autoplay: 1,
+      },
+      events: {
+        onStateChange(event) {
+          if (token !== playerToken || event.data !== YT.PlayerState.ENDED) return;
+          const next = queueAfter(video)[0];
+          if (next) location.hash = pageHref(next);
+        },
+      },
+    });
+  });
 }
 
 function viewsLabel(video) {
@@ -171,7 +222,7 @@ function renderChips(route) {
 function renderCard(video) {
   const card = document.createElement("article");
   card.className = "card";
-  const thumb = link(watchUrl(video), "thumb");
+  const thumb = link(pageHref(video), "thumb");
   const image = document.createElement("img");
   image.alt = "";
   image.src = video.thumbnail || `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`;
@@ -193,7 +244,7 @@ function renderCard(video) {
   }
   const text = document.createElement("div");
   text.className = "card-text";
-  const title = link(watchUrl(video), "title", video.title);
+  const title = link(pageHref(video), "title", video.title);
   title.title = video.title;
   const by = link(channelHref, "by", video.channel || "");
   const stat = document.createElement("p");
@@ -220,12 +271,70 @@ function empty(message) {
   return node;
 }
 
+function renderWatch(video) {
+  const layout = document.createElement("div");
+  layout.className = "watch";
+  const primary = document.createElement("div");
+  primary.className = "watch-main";
+  const frame = document.createElement("div");
+  frame.className = "frame";
+  const host = document.createElement("div");
+  host.id = "yt-player";
+  frame.append(host);
+  const heading = document.createElement("h1");
+  heading.className = "watch-title";
+  heading.textContent = video.title;
+  const by = link("#/channel/" + encodeURIComponent(video.channelId || video.channel || video.id), "by", video.channel || "");
+  const stat = document.createElement("p");
+  stat.className = "stat";
+  stat.textContent = statLine(video);
+  primary.append(frame, heading, by);
+  if (stat.textContent) primary.append(stat);
+
+  const side = document.createElement("aside");
+  side.className = "upnext";
+  const label = document.createElement("h2");
+  label.className = "upnext-label";
+  label.textContent = "下一部";
+  side.append(label);
+  for (const item of queueAfter(video).slice(0, 30)) {
+    const row = link(pageHref(item), "upnext-row");
+    const image = document.createElement("img");
+    image.alt = "";
+    image.src = item.thumbnail || `https://i.ytimg.com/vi/${item.id}/hqdefault.jpg`;
+    const copy = document.createElement("div");
+    const itemTitle = document.createElement("p");
+    itemTitle.className = "upnext-title";
+    itemTitle.textContent = item.title;
+    const channel = document.createElement("p");
+    channel.className = "stat";
+    channel.textContent = item.channel || "";
+    copy.append(itemTitle, channel);
+    row.append(image, copy);
+    side.append(row);
+  }
+  layout.append(primary, side);
+  main.append(layout);
+  mountPlayer(video);
+}
+
 function render() {
   const route = parseRoute();
+  destroyPlayer();
   renderGuide(route);
   renderTabs(route);
   main.replaceChildren();
   const all = videos();
+
+  if (route.name === "watch") {
+    const video = all.find((item) => item.id === route.id);
+    if (!video) {
+      main.append(empty("這部片不在清單裡"));
+      return;
+    }
+    renderWatch(video);
+    return;
+  }
 
   if (route.name === "channels") {
     const list = channels();
