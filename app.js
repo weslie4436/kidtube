@@ -446,6 +446,24 @@ function render() {
   main.append(renderGrid(list));
 }
 
+function reshuffleHome() {
+  const saved = {
+    seed: (Math.floor(Math.random() * 0x7fffffff) ^ Date.now()) >>> 0,
+    at: Date.now(),
+  };
+  sessionStorage.setItem("kidtube-mix", JSON.stringify(saved));
+  document.body.classList.remove("guide-open", "search-open");
+  const hash = location.hash || "#/";
+  if (hash === "#/" || hash === "#") render();
+  else location.hash = "#/";
+  window.scrollTo(0, 0);
+}
+
+document.querySelector(".logo").addEventListener("click", (event) => {
+  event.preventDefault();
+  reshuffleHome();
+});
+
 document.querySelector("#nav-toggle").addEventListener("click", () => {
   document.body.classList.toggle("guide-open");
 });
