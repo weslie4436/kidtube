@@ -51,21 +51,164 @@ function unit(seed, id) {
   return (hash >>> 0) / 4294967296;
 }
 
-function homeOrder(list) {
-  const mix = currentMix();
-  const seen = readSeen();
+const FUN = new Set([
+  "UCAOtE1V7Ots4DjM8JLlrYgg",
+  "UCiWRSesvSYmY7YOyz0tv_zQ",
+  "UCcdwLMPsaU2ezNSJU1nFoBQ",
+  "UCnJEWsS5agXCkqIpyHC9Grg",
+  "UCU-swpBLny7YEqNJB4hI1Kg",
+  "UCgL6J6oL8F69vm-GcPScmwg",
+  "UCWOA1ZGywLbqmigxE4Qlvuw",
+  "UCOmHUn--16B90oW2L6FRR3A",
+  "UCzgxx_DM2Dcb9Y1spb9mUJA",
+  "UCMki_UkHb4qSc0qyEcOHHJw",
+  "UCEpFoWeCMCo5z3EvWaz6hQQ",
+  "UC1HHeTLXHMM5FiEyQpS1toA",
+  "UCoDmztfkfbB3rtEa62BoUvw",
+  "UCMUQVMHC9IlOnlSgSHNklIQ",
+  "UC-lJnlie5xEBN9TdAJbp7Iw",
+  "UCIFakjQ2JYvhfKjw14qiNxQ",
+  "UCCPYSMEnbeepGM7RU6qxyUA",
+  "UCgdwtyqBunlRb-i-7PnCssQ",
+  "UCPt3IVJtf5TNwvLlm5ZPNSw",
+  "UCAB7g-EUHjuaAliqShDOvNg",
+  "UC31opT8RH0KAOTRPjyTJqQQ",
+  "UCfCxw2gv4kmhcAPKU1Iu8dg",
+  "UCX6OQ3DkcsbYNE6H8uQQuVA",
+  "UC4-79UOlP48-QNGgCko5p2g",
+  "UCIPPMRA040LQr5QPyJEbmXA",
+  "UC-Fnix71vRP64WXeo0ikd0Q",
+  "UCs-QBT4qkj_YiQw1ZntDO3g",
+  "UC9GtSLeksfK4yuJ_g1lgQbg",
+  "UCritGVo7pLJLUS8wEu32vow",
+  "UCDhM2k2Cua-JdobAh5moMFg",
+  "UCqwUnggBBct-AY2lAdI88jQ",
+  "UCnUAyD4t2LkvW68YrDh7fDg",
+  "UCk9GmdlDTBfgGRb7vXeRMoQ",
+  "UCod5V2dpnpJLklGvVOv5FcQ",
+  "UCXbRURMKT3H_w8dT-DWLIxA",
+  "UC8whlOg70m2Yr3qSMjUhh0g",
+  "UC2ff-9LhZKnDnw9XWHUOc_A",
+  "UCJnL-TBcsYrF2SLs7tmiC8Q",
+  "UCowiwt93gqGlNG4k5VDxO-w",
+  "UCU3s8CYosQHpV0fRbqi15wA",
+  "UCfbYNlxgLuKJXQZEhkMmaCQ",
+  "UC7Q3HUnJA3nvjZR2JeMn2Cw",
+  "UCJEER74X9kBenMT_x9iK9Mw",
+  "UC-qYkzKFdekoEniRu_FS3zg",
+  "UCijULR2sXLutCRBtW3_WEfA",
+  "UCVXzBnzP5i5W-3snrxu8kfg",
+  "UCPENYtHg4Xhmm6oX8zaQA7Q",
+  "UCuhAUMLzJxlP1W7mEk0_6lA",
+  "UC3y-P13TIRCXu7rF8928KGA",
+  "UCVaIiqzfKQsi7Qw4-X8TmmA",
+  "UCWFMjDuWKlct0jy89k2kkRA",
+  "UCyc9sUCxELTDK9vELO5Fzeg",
+  "UCaHwGJXFb28TekZMf7iFg5Q",
+  "UCtKtCiaWRz-d3EZn2xd1mdA",
+  "UCEIi7zFR_wE23jFncVtd6-A",
+]);
+
+function todayKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+}
+
+function readWatch() {
+  const blank = { videos: {}, day: todayKey(), streak: 0 };
+  let data = blank;
+  try { data = Object.assign(blank, JSON.parse(localStorage.getItem("kidtube-watch") || "{}")); } catch (error) { data = blank; }
+  if (!data.videos || typeof data.videos !== "object") data.videos = {};
+  if (data.day !== todayKey()) {
+    data.day = todayKey();
+    data.streak = 0;
+  }
+  return data;
+}
+
+function writeWatch(data) {
+  localStorage.setItem("kidtube-watch", JSON.stringify(data));
+}
+
+function isFun(video) {
+  return FUN.has(video.channelId);
+}
+
+function entertainmentShare(streak) {
+  const steps = 8;
+  const drop = Math.min(Math.max(streak || 0, 0), steps) / steps;
+  return 1 - drop * 0.5;
+}
+
+function notePlay(video) {
+  const data = readWatch();
+  const row = data.videos[video.id] || { plays: 0, seconds: 0 };
+  row.plays += 1;
+  data.videos[video.id] = row;
+  data.streak = isFun(video) ? (data.streak || 0) + 1 : 0;
+  writeWatch(data);
+}
+
+function addSeconds(id, seconds) {
+  if (!id || !(seconds > 0)) return;
+  const data = readWatch();
+  const row = data.videos[id] || { plays: 0, seconds: 0 };
+  row.seconds = Math.round((row.seconds || 0) + seconds);
+  data.videos[id] = row;
+  writeWatch(data);
+}
+
+function rankPool(list, mix, seen, watch) {
   const span = Math.max(list.length - 1, 1);
   const ranked = list.map((video, index) => {
     const memory = seen[video.id] || {};
+    const stat = watch.videos[video.id] || {};
     const recency = 1 - index / span;
     const jitter = unit(mix.seed, video.id);
     let cool = 0;
     if (memory.seed && memory.seed !== mix.seed && (memory.rank || 0) < 8) cool += 0.5;
     if (memory.watched && memory.watched < mix.at && Date.now() - memory.watched < 12 * 60 * 60 * 1000) cool += 0.35;
+    const plays = stat.plays || 0;
+    const minutes = (stat.seconds || 0) / 60;
+    cool += Math.min(0.6, plays * 0.08 + minutes * 0.02);
     return { video, score: recency * 0.58 + jitter * 0.42 - cool };
   });
   ranked.sort((a, b) => b.score - a.score || (a.video.index || 0) - (b.video.index || 0));
-  const ordered = ranked.map((row) => row.video);
+  return ranked.map((row) => row.video);
+}
+
+function blendFeeds(fun, rest, share) {
+  const out = [];
+  let funIndex = 0;
+  let restIndex = 0;
+  let funTaken = 0;
+  const total = fun.length + rest.length;
+  for (let n = 0; n < total; n += 1) {
+    const preferFun = funIndex < fun.length && (restIndex >= rest.length || funTaken / (n + 1) < share);
+    if (preferFun) {
+      out.push(fun[funIndex]);
+      funIndex += 1;
+      funTaken += 1;
+    } else {
+      out.push(rest[restIndex]);
+      restIndex += 1;
+    }
+  }
+  return out;
+}
+
+function homeOrder(list) {
+  const mix = currentMix();
+  const seen = readSeen();
+  const watch = readWatch();
+  const fun = [];
+  const rest = [];
+  for (const video of list) (isFun(video) ? fun : rest).push(video);
+  const ordered = blendFeeds(
+    rankPool(fun, mix, seen, watch),
+    rankPool(rest, mix, seen, watch),
+    entertainmentShare(watch.streak || 0)
+  );
   ordered.slice(0, 8).forEach((video, rank) => {
     seen[video.id] = Object.assign({}, seen[video.id], { seed: mix.seed, rank, shown: Date.now() });
   });
@@ -77,6 +220,82 @@ function noteWatched(video) {
   const seen = readSeen();
   seen[video.id] = Object.assign({}, seen[video.id], { watched: Date.now() });
   writeSeen(seen);
+}
+
+function foldText(value) {
+  return (value || "").toLowerCase().normalize("NFKC").replace(/\s+/g, " ").trim();
+}
+
+function compactText(value) {
+  return foldText(value).replace(/[^a-z0-9\u3400-\u9fff]+/g, "");
+}
+
+function queryTokens(query) {
+  return foldText(query).split(" ").filter(Boolean);
+}
+
+function escapeReg(token) {
+  return token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function tokenHit(text, token) {
+  const hay = foldText(text);
+  if (!token || !hay) return false;
+  if (!/^[a-z0-9]+$/.test(token)) return hay.includes(token);
+  const whole = new RegExp(`(^|[^a-z0-9])${escapeReg(token)}([^a-z0-9]|$)`);
+  if (whole.test(hay)) return true;
+  if (token.length >= 3) return new RegExp(`(^|[^a-z0-9])${escapeReg(token)}`).test(hay);
+  return false;
+}
+
+function packedHit(text, query) {
+  const packed = compactText(query);
+  if (packed.length < 2) return false;
+  const flat = compactText(text);
+  return flat === packed || flat.startsWith(packed);
+}
+
+function textMatches(text, tokens, query) {
+  if (!tokens.length) return false;
+  if (tokens.every((token) => tokenHit(text, token))) return true;
+  return packedHit(text, query);
+}
+
+function searchScore(video, tokens, query) {
+  const title = foldText(video.title);
+  const channel = foldText(video.channel);
+  const folded = foldText(query);
+  let score = 0;
+  if (channel === folded || compactText(channel) === compactText(query)) score += 120;
+  else if (tokens.every((token) => tokenHit(channel, token))) score += 70;
+  if (title === folded) score += 90;
+  else if (title.startsWith(folded)) score += 45;
+  score += tokens.filter((token) => tokenHit(title, token)).length * 12;
+  score -= (video.index || 0) * 0.01;
+  return score;
+}
+
+function searchVideos(list, query) {
+  const tokens = queryTokens(query);
+  if (!tokens.length) return [];
+  return list
+    .filter((video) => textMatches(`${video.title}\n${video.channel}`, tokens, query))
+    .map((video) => ({ video, score: searchScore(video, tokens, query) }))
+    .sort((a, b) => b.score - a.score || (a.video.index || 0) - (b.video.index || 0))
+    .slice(0, 80)
+    .map((row) => row.video);
+}
+
+function searchChannels(query) {
+  const tokens = queryTokens(query);
+  if (!tokens.length) return [];
+  return channels()
+    .filter((channel) => textMatches(channel.name, tokens, query))
+    .sort((a, b) => {
+      const exactA = foldText(a.name) === foldText(query) ? 1 : 0;
+      const exactB = foldText(b.name) === foldText(query) ? 1 : 0;
+      return exactB - exactA || a.name.length - b.name.length;
+    });
 }
 
 function channels() {
@@ -109,8 +328,56 @@ function queueAfter(video) {
 
 let player = null;
 let playerToken = 0;
+let watchClock = null;
+let notedWatchId = "";
+
+function stopClock() {
+  if (!watchClock) return;
+  if (watchClock.playing) {
+    const delta = (Date.now() - watchClock.tick) / 1000;
+    if (delta > 0 && delta < 30) watchClock.pending += delta;
+  }
+  if (watchClock.timer) clearInterval(watchClock.timer);
+  if (watchClock.pending > 0.4) addSeconds(watchClock.id, watchClock.pending);
+  watchClock = null;
+}
+
+function markPlaying(playing) {
+  if (!watchClock) return;
+  if (watchClock.playing && !playing) {
+    const delta = (Date.now() - watchClock.tick) / 1000;
+    if (delta > 0 && delta < 30) watchClock.pending += delta;
+  }
+  watchClock.playing = playing;
+  watchClock.tick = Date.now();
+  if (watchClock.pending >= 2) {
+    addSeconds(watchClock.id, watchClock.pending);
+    watchClock.pending = 0;
+  }
+}
+
+function startClock(videoId) {
+  stopClock();
+  watchClock = {
+    id: videoId,
+    playing: false,
+    tick: Date.now(),
+    pending: 0,
+    timer: setInterval(() => {
+      if (!watchClock || !watchClock.playing) return;
+      const delta = (Date.now() - watchClock.tick) / 1000;
+      watchClock.tick = Date.now();
+      if (delta > 0 && delta < 5) watchClock.pending += delta;
+      if (watchClock.pending >= 5) {
+        addSeconds(watchClock.id, watchClock.pending);
+        watchClock.pending = 0;
+      }
+    }, 1000),
+  };
+}
 
 function destroyPlayer() {
+  stopClock();
   playerToken += 1;
   if (!player) return;
   try { player.destroy(); } catch (error) { /* already gone */ }
@@ -134,6 +401,7 @@ function mountPlayer(video) {
   const token = ++playerToken;
   ensureApi().then(() => {
     if (token !== playerToken || !document.getElementById("yt-player")) return;
+    startClock(video.id);
     player = new YT.Player("yt-player", {
       videoId: video.id,
       host: "https://www.youtube.com",
@@ -146,7 +414,9 @@ function mountPlayer(video) {
       },
       events: {
         onStateChange(event) {
-          if (token !== playerToken || event.data !== YT.PlayerState.ENDED) return;
+          if (token !== playerToken) return;
+          markPlaying(event.data === YT.PlayerState.PLAYING);
+          if (event.data !== YT.PlayerState.ENDED) return;
           const next = queueAfter(video)[0];
           if (next) location.hash = pageHref(next);
         },
@@ -314,6 +584,20 @@ function renderCard(video) {
   return card;
 }
 
+function renderChannelHit(channel) {
+  const row = link("#/channel/" + encodeURIComponent(channel.id), "channel-hit");
+  row.append(avatarNode(channel.avatar, channel.name, "avatar"));
+  const text = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = channel.name;
+  const stat = document.createElement("p");
+  stat.className = "stat";
+  stat.textContent = `${channel.count} 部影片`;
+  text.append(title, stat);
+  row.append(text);
+  return row;
+}
+
 function renderGrid(list) {
   const grid = document.createElement("div");
   grid.className = "grid";
@@ -389,10 +673,15 @@ function render() {
       main.append(empty("這部片不在清單裡"));
       return;
     }
-    noteWatched(video);
+    if (notedWatchId !== video.id) {
+      notedWatchId = video.id;
+      notePlay(video);
+      noteWatched(video);
+    }
     renderWatch(video);
     return;
   }
+  notedWatchId = "";
 
   if (route.name === "channels") {
     const list = channels();
@@ -429,9 +718,9 @@ function render() {
   else if (route.name === "channel") {
     list = all.filter((video) => (video.channelId || video.channel) === route.id);
   } else if (route.name === "results") {
-    const q = route.q.trim().toLowerCase();
-    list = all.filter((video) => `${video.title} ${video.channel}`.toLowerCase().includes(q));
+    list = searchVideos(all, route.q);
     queryInput.value = route.q;
+    for (const channel of searchChannels(route.q)) main.append(renderChannelHit(channel));
   }
 
   if (route.name !== "results") main.append(renderChips(route));
@@ -480,11 +769,24 @@ document.querySelector("#search-toggle").addEventListener("click", () => {
 document.querySelector("#search-back").addEventListener("click", () => {
   document.body.classList.remove("search-open");
 });
+function goSearch() {
+  const q = queryInput.value.trim();
+  document.body.classList.remove("search-open");
+  if (!q) {
+    if ((location.hash || "#/") === "#/" || location.hash === "#") render();
+    else location.hash = "#/";
+    return;
+  }
+  const next = "#/results/" + encodeURIComponent(q);
+  let same = false;
+  try { same = decodeURIComponent((location.hash || "").replace(/^#/, "")) === "/results/" + q; } catch (error) { same = false; }
+  if (same) render();
+  else location.hash = next;
+}
+
 searchForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  const q = queryInput.value.trim();
-  location.hash = q ? "#/results/" + encodeURIComponent(q) : "#/";
-  document.body.classList.remove("search-open");
+  goSearch();
 });
 window.addEventListener("hashchange", render);
 

@@ -178,6 +178,29 @@ img { display: block; max-width: 100%; }
   margin: 12px 0;
 }
 
+.channel-hit {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 4px 0 16px;
+  padding: 8px 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.channel-hit .avatar,
+.channel-hit .letter {
+  width: 80px;
+  height: 80px;
+  font-size: 32px;
+}
+
+.channel-hit strong {
+  display: block;
+  font-size: 18px;
+  font-weight: 500;
+}
+
 .avatar-link { display: flex; flex: none; }
 
 .avatar, .letter {
