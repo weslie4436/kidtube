@@ -1,0 +1,13 @@
+---
+description: KidTube Pages 改完必推 main
+alwaysApply: true
+---
+
+# 修完就推 Pages
+
+會出現在 GitHub Pages 的 html／js／css／圖示／`playlist.json`／`catalog.json`／`?v=`：驗證後 `commit` + `push origin main`。Pages 吃 `main` 根目錄。只 commit 不 push = 線上還是舊門面。不要問要不要推。禁止 PR。
+
+- 門面：https://weslie4436.github.io/kidtube/
+- 不提交 Google 密碼、OAuth、API 金鑰
+- 不把播放器嵌回這個網站（嵌入播放器用不到 Premium、iOS 上會出現廣告）
+- 點影片必須開 `https://www.youtube.com/watch?v=&list=`
