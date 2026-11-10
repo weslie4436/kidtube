@@ -5,7 +5,7 @@ alwaysApply: true
 
 # 修完就推 Pages
 
-會出現在 GitHub Pages 的 html／js／css／圖示／`playlist.json`／`catalog.json`／`?v=`：驗證後 `commit` + `push origin main`。Pages 吃 `main` 根目錄。只 commit 不 push = 線上還是舊門面。不要問要不要推。禁止 PR。
+會出現在 GitHub Pages 的 html／js／css／圖示／`channels.json`／`playlist.json`／`catalog.json`／`?v=`：驗證後 `commit` + `push origin main`。Pages 吃 `main` 根目錄。只 commit 不 push = 線上還是舊門面。不要問要不要推。禁止 PR。
 
 - 門面：https://weslie4436.github.io/kidtube/
 - 不提交 Google 密碼、OAuth、API 金鑰

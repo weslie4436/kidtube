@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -237,33 +238,127 @@ def load_playlist(playlist_id: str) -> tuple[str, list[dict], str]:
     return "", videos, "rss" if videos else ""
 
 
+def resolve_channel_id(value: str) -> str:
+    value = value.strip()
+    if re.fullmatch(r"UC[\w-]{22}", value):
+        return value
+    in_url = re.search(r"/channel/(UC[\w-]{22})", value)
+    if in_url:
+        return in_url.group(1)
+    if value.startswith("@"):
+        page = "https://www.youtube.com/" + value
+    elif value.startswith("http"):
+        page = value
+    else:
+        page = "https://www.youtube.com/@" + value.lstrip("@")
+    html = fetch(page).decode("utf-8", "replace")
+    external = re.search(r'"externalId":"(UC[\w-]{22})"', html)
+    if external:
+        return external.group(1)
+    canonical = re.search(r"youtube\.com/channel/(UC[\w-]{22})", html)
+    if canonical:
+        return canonical.group(1)
+    raise ValueError(f"cannot resolve channel: {value}")
+
+
+def channel_inputs(config: dict) -> list[str]:
+    values = []
+    for item in config.get("channels") or []:
+        if isinstance(item, str) and item.strip():
+            values.append(item.strip())
+        elif isinstance(item, dict):
+            raw = (item.get("url") or item.get("id") or "").strip()
+            if raw:
+                values.append(raw)
+    return values
+
+
+def stamp(videos: list[dict], list_id: str, channel_id: str = "") -> list[dict]:
+    stamped = []
+    for video in videos:
+        video = dict(video)
+        video["list"] = list_id
+        if channel_id and not video.get("channelId"):
+            video["channelId"] = channel_id
+        stamped.append(video)
+    return stamped
+
+
+def dedupe(videos: list[dict]) -> list[dict]:
+    seen = set()
+    unique = []
+    counts: dict[str, int] = {}
+    for video in videos:
+        if video["id"] in seen:
+            continue
+        seen.add(video["id"])
+        key = video.get("list") or ""
+        counts[key] = counts.get(key, 0) + 1
+        video["index"] = counts[key]
+        unique.append(video)
+    return unique
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--playlist", default="")
+    parser.add_argument("--channel", action="append", default=[])
     parser.add_argument("--out", default="")
     args = parser.parse_args()
 
-    config = json.loads((ROOT / "playlist.json").read_text(encoding="utf-8"))
-    playlist_id = (args.playlist or config.get("playlistId") or "").strip()
+    playlist_config = json.loads((ROOT / "playlist.json").read_text(encoding="utf-8"))
+    channels_config = json.loads((ROOT / "channels.json").read_text(encoding="utf-8"))
+    playlist_id = (args.playlist or playlist_config.get("playlistId") or "").strip()
+    channel_values = args.channel or channel_inputs(channels_config)
     out = Path(args.out) if args.out else ROOT / "catalog.json"
-    if not playlist_id:
-        print("playlist.json has no playlistId; catalog left unchanged")
+    if not playlist_id and not channel_values:
+        print("no channels and no playlist; catalog left unchanged")
         return 0
 
-    title, videos, source = load_playlist(playlist_id)
+    videos: list[dict] = []
+    resolved: list[str] = []
+    sources: list[str] = []
+    for value in channel_values:
+        try:
+            channel_id = resolve_channel_id(value)
+            uploads = "UU" + channel_id[2:]
+            _title, found, source = load_playlist(uploads)
+        except Exception as error:  # noqa: BLE001 - one bad channel should not wipe the rest
+            print(f"channel failed ({value}): {error}")
+            continue
+        if not found:
+            print(f"channel has no videos: {value}")
+            continue
+        resolved.append(channel_id)
+        sources.append(f"{channel_id}:{source}")
+        videos.extend(stamp(found, uploads, channel_id))
+
+    if playlist_id:
+        title, found, source = load_playlist(playlist_id)
+        if found:
+            sources.append(f"playlist:{source}")
+            videos.extend(stamp(found, playlist_id))
+        else:
+            title = ""
+            print("playlist has no videos")
+    else:
+        title = ""
+
+    videos = dedupe(videos)
     if not videos:
         print("no videos read; catalog left unchanged")
         return 0
 
     payload = {
         "playlistId": playlist_id,
+        "channels": resolved,
         "title": title,
         "updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "source": source,
+        "source": ",".join(sources),
         "videos": videos,
     }
     out.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"wrote {len(videos)} videos via {source} -> {out}")
+    print(f"wrote {len(videos)} videos via {payload['source']} -> {out}")
     return 0
 
 

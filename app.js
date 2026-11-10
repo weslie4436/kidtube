@@ -39,8 +39,9 @@ function channels() {
 function watchUrl(video) {
   const url = new URL("https://www.youtube.com/watch");
   url.searchParams.set("v", video.id);
-  if (catalog.playlistId) {
-    url.searchParams.set("list", catalog.playlistId);
+  const list = video.list || catalog.playlistId;
+  if (list) {
+    url.searchParams.set("list", list);
     if (video.index) url.searchParams.set("index", String(video.index));
   }
   return url.toString();
