@@ -790,6 +790,35 @@ searchForm.addEventListener("submit", (event) => {
 });
 window.addEventListener("hashchange", render);
 
+function fitHeight() {
+  const vv = window.visualViewport;
+  const height = Math.round((vv && vv.height) || window.innerHeight || 0);
+  if (height > 0) document.documentElement.style.setProperty("--vvh", height + "px");
+}
+
+function refitStandalone() {
+  fitHeight();
+  const standalone = window.navigator.standalone === true
+    || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+  if (!standalone) return;
+  const meta = document.querySelector('meta[name="viewport"]');
+  if (!meta) return;
+  meta.content = "width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover";
+  window.setTimeout(() => {
+    const width = Math.round(window.innerWidth || document.documentElement.clientWidth || 0);
+    if (!width) return;
+    meta.content = "width=" + width + ", initial-scale=1, maximum-scale=1, viewport-fit=cover";
+    fitHeight();
+  }, 80);
+}
+
+document.addEventListener("gesturestart", (event) => event.preventDefault());
+window.addEventListener("resize", fitHeight);
+window.addEventListener("orientationchange", refitStandalone);
+window.addEventListener("pageshow", refitStandalone);
+if (window.visualViewport) window.visualViewport.addEventListener("resize", fitHeight);
+fitHeight();
+
 fetch("catalog.json?v=4", { cache: "no-cache" })
   .then((res) => {
     if (!res.ok) throw new Error(String(res.status));
