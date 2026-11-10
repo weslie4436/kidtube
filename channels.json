@@ -1,4 +1,6 @@
 {
-  "channels": [],
+  "channels": [
+    "https://www.youtube.com/@SesameStreet"
+  ],
   "note": "每個要整個放行的頻道貼一次網址（或 @名稱）。新片會自己進來，不用逐支加進播放清單。"
 }
