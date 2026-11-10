@@ -22,6 +22,63 @@ function videos() {
   return Array.isArray(catalog.videos) ? catalog.videos : [];
 }
 
+function currentMix() {
+  const key = "kidtube-mix";
+  const maxAge = 3 * 60 * 60 * 1000;
+  let saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem(key) || "null"); } catch (error) { saved = null; }
+  if (!saved || Date.now() - saved.at > maxAge) {
+    saved = { seed: (Math.floor(Math.random() * 0x7fffffff) ^ Date.now()) >>> 0, at: Date.now() };
+    sessionStorage.setItem(key, JSON.stringify(saved));
+  }
+  return saved;
+}
+
+function readSeen() {
+  try { return JSON.parse(localStorage.getItem("kidtube-seen") || "{}"); } catch (error) { return {}; }
+}
+
+function writeSeen(seen) {
+  localStorage.setItem("kidtube-seen", JSON.stringify(seen));
+}
+
+function unit(seed, id) {
+  let hash = seed >>> 0;
+  const text = String(id);
+  for (let i = 0; i < text.length; i += 1) {
+    hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+  }
+  return (hash >>> 0) / 4294967296;
+}
+
+function homeOrder(list) {
+  const mix = currentMix();
+  const seen = readSeen();
+  const span = Math.max(list.length - 1, 1);
+  const ranked = list.map((video, index) => {
+    const memory = seen[video.id] || {};
+    const recency = 1 - index / span;
+    const jitter = unit(mix.seed, video.id);
+    let cool = 0;
+    if (memory.seed && memory.seed !== mix.seed && (memory.rank || 0) < 8) cool += 0.5;
+    if (memory.watched && memory.watched < mix.at && Date.now() - memory.watched < 12 * 60 * 60 * 1000) cool += 0.35;
+    return { video, score: recency * 0.58 + jitter * 0.42 - cool };
+  });
+  ranked.sort((a, b) => b.score - a.score || (a.video.index || 0) - (b.video.index || 0));
+  const ordered = ranked.map((row) => row.video);
+  ordered.slice(0, 8).forEach((video, rank) => {
+    seen[video.id] = Object.assign({}, seen[video.id], { seed: mix.seed, rank, shown: Date.now() });
+  });
+  writeSeen(seen);
+  return ordered;
+}
+
+function noteWatched(video) {
+  const seen = readSeen();
+  seen[video.id] = Object.assign({}, seen[video.id], { watched: Date.now() });
+  writeSeen(seen);
+}
+
 function channels() {
   const map = new Map();
   for (const video of videos()) {
@@ -332,6 +389,7 @@ function render() {
       main.append(empty("這部片不在清單裡"));
       return;
     }
+    noteWatched(video);
     renderWatch(video);
     return;
   }
@@ -367,7 +425,8 @@ function render() {
   }
 
   let list = all;
-  if (route.name === "channel") {
+  if (route.name === "home") list = homeOrder(all);
+  else if (route.name === "channel") {
     list = all.filter((video) => (video.channelId || video.channel) === route.id);
   } else if (route.name === "results") {
     const q = route.q.trim().toLowerCase();
