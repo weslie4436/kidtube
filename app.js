@@ -354,10 +354,30 @@ function upNext(video) {
   return mixed;
 }
 
-let player = null;
-let playerToken = 0;
 let watchClock = null;
 let notedWatchId = "";
+let watching = null;
+let wantedId = "";
+let seenWanted = false;
+let advancedFrom = "";
+let paintedHash = "";
+let pendingTap = "";
+
+const shell = document.createElement("iframe");
+shell.id = "yt-player";
+shell.name = "yt-player";
+shell.title = "播放";
+shell.className = "yt-hidden";
+shell.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+shell.allowFullscreen = true;
+shell.setAttribute("playsinline", "1");
+const titleShield = document.createElement("div");
+titleShield.className = "yt-shield";
+titleShield.hidden = true;
+const logoShield = document.createElement("div");
+logoShield.className = "yt-shield";
+logoShield.hidden = true;
+document.body.append(shell, titleShield, logoShield);
 
 function stopClock() {
   if (!watchClock) return;
@@ -404,17 +424,12 @@ function startClock(videoId) {
   };
 }
 
-let playerWatch = null;
-let ignoreHash = false;
-
-function destroyPlayer() {
-  stopClock();
-  playerToken += 1;
-  if (playerWatch) {
-    window.removeEventListener("message", playerWatch);
-    playerWatch = null;
-  }
-  player = null;
+function watchIdFromHref(href) {
+  const raw = href.slice("#/watch/".length).split(/[?#]/)[0];
+  let id = raw;
+  try { id = decodeURIComponent(raw); } catch (error) { id = raw; }
+  if (!/^[A-Za-z0-9_-]{6,32}$/.test(id)) return "";
+  return id;
 }
 
 function embedSrc(videoId) {
@@ -431,72 +446,126 @@ function embedSrc(videoId) {
   return `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?${query}`;
 }
 
-function playerCommand(iframe, func, args) {
-  if (!iframe || !iframe.contentWindow) return;
-  iframe.contentWindow.postMessage(JSON.stringify({
-    event: "command",
-    func,
-    args: args || [],
-    channel: "widget",
-    id: "yt-player",
-  }), "*");
+function stopPlayer() {
+  pendingTap = "";
+  shell.className = "yt-hidden";
+  shell.style.cssText = "";
+  titleShield.hidden = true;
+  logoShield.hidden = true;
+  shell.src = "about:blank";
+  shell.dataset.video = "";
+  shell.dataset.scripted = "";
+  watching = null;
+  wantedId = "";
+  seenWanted = false;
+}
+
+function alignPlayer() {
+  const frame = document.querySelector(".watch .frame");
+  shell.className = "yt-float";
+  if (!frame) {
+    shell.style.cssText = "";
+    titleShield.hidden = true;
+    logoShield.hidden = true;
+    void shell.offsetWidth;
+    return;
+  }
+  const box = frame.getBoundingClientRect();
+  shell.style.top = box.top + "px";
+  shell.style.left = box.left + "px";
+  shell.style.width = box.width + "px";
+  shell.style.height = box.height + "px";
+  shell.style.right = "auto";
+  shell.style.borderRadius = getComputedStyle(frame).borderRadius;
+  titleShield.hidden = false;
+  logoShield.hidden = false;
+  titleShield.style.top = box.top + "px";
+  titleShield.style.left = box.left + "px";
+  titleShield.style.width = box.width + "px";
+  titleShield.style.height = "72px";
+  logoShield.style.top = (box.bottom - 64) + "px";
+  logoShield.style.left = (box.right - 148) + "px";
+  logoShield.style.width = "148px";
+  logoShield.style.height = "64px";
+}
+
+function revealPlayer() {
+  const frame = document.querySelector(".watch .frame");
+  if (frame && frame.getBoundingClientRect().height > 40 && shell.classList.contains("yt-float")) return;
+  alignPlayer();
 }
 
 function mountPlayer(video) {
-  const token = ++playerToken;
-  destroyPlayer();
-  playerToken = token;
-  const host = document.getElementById("yt-player");
-  if (!host) return;
-  const iframe = document.createElement("iframe");
-  iframe.id = "yt-player";
-  iframe.title = video.title || "播放";
-  iframe.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
-  iframe.allowFullscreen = true;
-  iframe.src = embedSrc(video.id);
-  host.replaceWith(iframe);
+  watching = video;
+  if (wantedId !== video.id) {
+    seenWanted = false;
+    wantedId = video.id;
+  }
+  shell.title = video.title || "播放";
+  alignPlayer();
   startClock(video.id);
-  const blocked = document.createElement("div");
-  blocked.className = "yt-block yt-block-title";
-  const logo = document.createElement("div");
-  logo.className = "yt-block yt-block-logo";
-  iframe.parentElement.append(blocked, logo);
-
-  iframe.addEventListener("load", () => {
-    if (token !== playerToken || !iframe.contentWindow) return;
-    iframe.contentWindow.postMessage(JSON.stringify({
-      event: "listening",
-      id: "yt-player",
-      channel: "widget",
-    }), "*");
-    playerCommand(iframe, "playVideo");
-  });
-
-  playerWatch = (event) => {
-    if (token !== playerToken) return;
-    const origin = event.origin || "";
-    if (!/^https:\/\/([a-z0-9-]+\.)?(youtube\.com|youtube-nocookie\.com)$/.test(origin)) return;
-    let data = event.data;
-    if (typeof data === "string") {
-      try { data = JSON.parse(data); } catch (error) { return; }
-    }
-    if (!data || typeof data !== "object") return;
-    const info = data.info && typeof data.info === "object" ? data.info : null;
-    const foreign = info && info.videoData && info.videoData.video_id;
-    if (foreign && foreign !== video.id) {
-      const allowed = videos().find((item) => item.id === foreign);
-      const next = allowed || upNext(video)[0];
-      if (next && next.id !== video.id) show(pageHref(next));
-      return;
-    }
-    const state = data.event === "onStateChange" ? data.info : (info ? info.playerState : undefined);
-    if (state === 1 || state === 2 || state === 0) markPlaying(state === 1);
-    if (state !== 0) return;
-    const next = upNext(video)[0];
-    if (next) show(pageHref(next));
-  };
-  window.addEventListener("message", playerWatch);
+  const src = shell.src || "";
+  const landed = src.includes("/embed/" + video.id);
+  shell.dataset.video = video.id;
+  if (landed || pendingTap === video.id) {
+    shell.dataset.scripted = pendingTap === video.id ? "0" : shell.dataset.scripted || "0";
+    pendingTap = "";
+    return;
+  }
+  shell.dataset.scripted = "1";
+  shell.src = embedSrc(video.id);
 }
+
+shell.addEventListener("load", () => {
+  if (!shell.contentWindow) return;
+  try {
+    const href = shell.contentWindow.location.href;
+    if (!href || href === "about:blank") return;
+  } catch (error) {
+    // 已經進到 YouTube，讀不到網址才是正常的。
+  }
+  shell.contentWindow.postMessage(JSON.stringify({
+    event: "listening",
+    id: "yt-player",
+    channel: "widget",
+  }), "*");
+});
+
+window.addEventListener("message", (event) => {
+  const origin = event.origin || "";
+  if (!/^https:\/\/([a-z0-9-]+\.)?(youtube\.com|youtube-nocookie\.com)$/.test(origin)) return;
+  if (!watching) return;
+  let data = event.data;
+  if (typeof data === "string") {
+    try { data = JSON.parse(data); } catch (error) { return; }
+  }
+  if (!data || typeof data !== "object") return;
+  const info = data.info && typeof data.info === "object" ? data.info : null;
+  const foreign = info && typeof info.videoData === "object" && info.videoData ? info.videoData.video_id : "";
+  if (foreign && foreign === wantedId) seenWanted = true;
+  const rawState = data.event === "onStateChange" ? data.info : (info ? info.playerState : undefined);
+  const state = Number(rawState);
+  if (!Number.isFinite(state)) return;
+  if ((state === 1 || state === 2 || state === 0) && (!foreign || foreign === wantedId)) {
+    markPlaying(state === 1);
+  }
+  if (state === 1 && seenWanted && foreign && foreign !== wantedId) {
+    const allowed = videos().find((item) => item.id === foreign);
+    const next = allowed || upNext(watching)[0];
+    if (!next || next.id === wantedId) return;
+    advancedFrom = wantedId;
+    shell.src = embedSrc(next.id);
+    show(pageHref(next));
+    return;
+  }
+  if (state !== 0 || advancedFrom === wantedId) return;
+  if (foreign && foreign !== wantedId) return;
+  const next = upNext(watching)[0];
+  if (!next || next.id === wantedId) return;
+  advancedFrom = wantedId;
+  shell.src = embedSrc(next.id);
+  show(pageHref(next));
+});
 
 function viewsLabel(video) {
   const views = (video.views || "").trim();
@@ -733,9 +802,6 @@ function renderWatch(video) {
   primary.className = "watch-main";
   const frame = document.createElement("div");
   frame.className = "frame";
-  const host = document.createElement("div");
-  host.id = "yt-player";
-  frame.append(host);
   const heading = document.createElement("h1");
   heading.className = "watch-title";
   heading.textContent = video.title;
@@ -774,16 +840,19 @@ function renderWatch(video) {
 }
 
 function render() {
+  paintedHash = location.hash || "#/";
   const route = parseRoute();
   stopFeed();
-  destroyPlayer();
+  stopClock();
   renderGuide(route);
   renderTabs(route);
-  main.replaceChildren();
   const all = videos();
+  const picked = route.name === "watch" ? all.find((item) => item.id === route.id) : null;
+  if (!picked) stopPlayer();
+  main.replaceChildren();
 
   if (route.name === "watch") {
-    const video = all.find((item) => item.id === route.id);
+    const video = picked;
     if (!video) {
       main.append(empty("這部片不在清單裡"));
       return;
@@ -907,25 +976,52 @@ function show(hash) {
   const next = hash || "#/";
   const current = location.hash || "#/";
   if (current !== next) {
-    ignoreHash = true;
+    paintedHash = next;
     location.hash = next;
-    ignoreHash = false;
   }
   render();
   if (next.startsWith("#/watch/")) window.scrollTo(0, 0);
 }
 
+function armWatchLink(anchor) {
+  const href = anchor.getAttribute("href") || "";
+  if (!href.startsWith("#/watch/") || anchor.dataset.watch) return;
+  const videoId = watchIdFromHref(href);
+  if (!videoId) return;
+  anchor.dataset.watch = href;
+  anchor.href = embedSrc(videoId);
+  anchor.target = "yt-player";
+}
+
+document.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  const anchor = event.target.closest("a");
+  if (!anchor || anchor.classList.contains("logo")) return;
+  armWatchLink(anchor);
+}, true);
+
 document.addEventListener("click", (event) => {
   const anchor = event.target.closest("a");
   if (!anchor || anchor.classList.contains("logo")) return;
   const href = anchor.getAttribute("href") || "";
+  const watch = anchor.dataset.watch || (href.startsWith("#/watch/") ? href : "");
+  const plain = event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+  const videoId = plain ? watchIdFromHref(watch) : "";
+  if (videoId) {
+    // 留給瀏覽器自己把這一下點擊送進播放器。程式事後再設網址，手機就不准有聲開播。
+    if (!anchor.dataset.watch) armWatchLink(anchor);
+    revealPlayer();
+    pendingTap = videoId;
+    setTimeout(() => show(watch), 0);
+    return;
+  }
   if (!href.startsWith("#")) return;
   event.preventDefault();
   show(href);
 });
 
 window.addEventListener("hashchange", () => {
-  if (ignoreHash) return;
+  if ((location.hash || "#/") === paintedHash) return;
   render();
 });
 
@@ -943,18 +1039,27 @@ function pinViewport() {
   const meta = document.querySelector('meta[name="viewport"]');
   const vv = window.visualViewport;
   const width = Math.round((vv && vv.width) || window.innerWidth || 0);
-  if (!meta || !width) return;
-  const next = "width=" + width + ", initial-scale=1, maximum-scale=1, viewport-fit=cover";
-  if (meta.content !== next) meta.content = next;
+  if (meta && width) {
+    const next = "width=" + width + ", initial-scale=1, maximum-scale=1, viewport-fit=cover";
+    if (meta.content !== next) meta.content = next;
+  }
+  if (watching) alignPlayer();
 }
 
 document.addEventListener("gesturestart", (event) => event.preventDefault());
-window.addEventListener("resize", fitHeight);
+window.addEventListener("resize", () => {
+  fitHeight();
+  if (watching) alignPlayer();
+});
+window.addEventListener("scroll", () => {
+  if (watching) alignPlayer();
+}, { passive: true });
 window.addEventListener("orientationchange", () => {
   pinViewport();
   requestAnimationFrame(pinViewport);
 });
 window.addEventListener("pageshow", pinViewport);
+window.addEventListener("pagehide", stopPlayer);
 if (window.visualViewport) window.visualViewport.addEventListener("resize", pinViewport);
 pinViewport();
 
