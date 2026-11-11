@@ -317,13 +317,41 @@ function pageHref(video) {
   return "#/watch/" + encodeURIComponent(video.id);
 }
 
-function queueAfter(video) {
+function upNext(video) {
   const sameKey = video.channelId || video.channel;
   const same = videos().filter((item) => (item.channelId || item.channel) === sameKey && item.id !== video.id);
   const after = same.filter((item) => (item.index || 0) > (video.index || 0));
   const before = same.filter((item) => (item.index || 0) <= (video.index || 0));
-  const others = videos().filter((item) => (item.channelId || item.channel) !== sameKey);
-  return [...after, ...before, ...others];
+  const sameQueue = [...after, ...before];
+  const buckets = new Map();
+  for (const item of videos()) {
+    const key = item.channelId || item.channel;
+    if (key === sameKey || item.id === video.id) continue;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(item);
+  }
+  const keys = [...buckets.keys()];
+  const mixed = [];
+  let sameIndex = 0;
+  let otherIndex = keys.length ? Math.floor(unit(1, video.id) * keys.length) : 0;
+  while (mixed.length < 30 && (sameIndex < sameQueue.length || keys.some((key) => buckets.get(key).length))) {
+    for (let count = 0; count < 2 && sameIndex < sameQueue.length && mixed.length < 30; count += 1) {
+      mixed.push(sameQueue[sameIndex]);
+      sameIndex += 1;
+    }
+    if (!keys.length || mixed.length >= 30) continue;
+    let guard = 0;
+    while (guard < keys.length) {
+      const key = keys[otherIndex % keys.length];
+      otherIndex += 1;
+      guard += 1;
+      const bucket = buckets.get(key);
+      if (!bucket.length) continue;
+      mixed.push(bucket.shift());
+      break;
+    }
+  }
+  return mixed;
 }
 
 let player = null;
@@ -376,53 +404,98 @@ function startClock(videoId) {
   };
 }
 
+let playerWatch = null;
+let ignoreHash = false;
+
 function destroyPlayer() {
   stopClock();
   playerToken += 1;
-  if (!player) return;
-  try { player.destroy(); } catch (error) { /* already gone */ }
+  if (playerWatch) {
+    window.removeEventListener("message", playerWatch);
+    playerWatch = null;
+  }
   player = null;
 }
 
-function ensureApi() {
-  if (window.YT && window.YT.Player) return Promise.resolve();
-  if (!window.__ytApi) {
-    window.__ytApi = new Promise((resolve) => {
-      const tag = document.createElement("script");
-      tag.src = "https://www.youtube.com/iframe_api";
-      window.onYouTubeIframeAPIReady = () => resolve();
-      document.head.append(tag);
-    });
-  }
-  return window.__ytApi;
+function embedSrc(videoId) {
+  const query = new URLSearchParams({
+    autoplay: "1",
+    playsinline: "1",
+    rel: "0",
+    modestbranding: "1",
+    enablejsapi: "1",
+    origin: location.origin,
+    iv_load_policy: "3",
+    fs: "1",
+  });
+  return `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?${query}`;
+}
+
+function playerCommand(iframe, func, args) {
+  if (!iframe || !iframe.contentWindow) return;
+  iframe.contentWindow.postMessage(JSON.stringify({
+    event: "command",
+    func,
+    args: args || [],
+    channel: "widget",
+    id: "yt-player",
+  }), "*");
 }
 
 function mountPlayer(video) {
   const token = ++playerToken;
-  ensureApi().then(() => {
-    if (token !== playerToken || !document.getElementById("yt-player")) return;
-    startClock(video.id);
-    player = new YT.Player("yt-player", {
-      videoId: video.id,
-      host: "https://www.youtube.com",
-      playerVars: {
-        rel: 0,
-        modestbranding: 1,
-        playsinline: 1,
-        origin: location.origin,
-        autoplay: 1,
-      },
-      events: {
-        onStateChange(event) {
-          if (token !== playerToken) return;
-          markPlaying(event.data === YT.PlayerState.PLAYING);
-          if (event.data !== YT.PlayerState.ENDED) return;
-          const next = queueAfter(video)[0];
-          if (next) location.hash = pageHref(next);
-        },
-      },
-    });
+  destroyPlayer();
+  playerToken = token;
+  const host = document.getElementById("yt-player");
+  if (!host) return;
+  const iframe = document.createElement("iframe");
+  iframe.id = "yt-player";
+  iframe.title = video.title || "播放";
+  iframe.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+  iframe.allowFullscreen = true;
+  iframe.src = embedSrc(video.id);
+  host.replaceWith(iframe);
+  startClock(video.id);
+  const blocked = document.createElement("div");
+  blocked.className = "yt-block yt-block-title";
+  const logo = document.createElement("div");
+  logo.className = "yt-block yt-block-logo";
+  iframe.parentElement.append(blocked, logo);
+
+  iframe.addEventListener("load", () => {
+    if (token !== playerToken || !iframe.contentWindow) return;
+    iframe.contentWindow.postMessage(JSON.stringify({
+      event: "listening",
+      id: "yt-player",
+      channel: "widget",
+    }), "*");
+    playerCommand(iframe, "playVideo");
   });
+
+  playerWatch = (event) => {
+    if (token !== playerToken) return;
+    const origin = event.origin || "";
+    if (!/^https:\/\/([a-z0-9-]+\.)?(youtube\.com|youtube-nocookie\.com)$/.test(origin)) return;
+    let data = event.data;
+    if (typeof data === "string") {
+      try { data = JSON.parse(data); } catch (error) { return; }
+    }
+    if (!data || typeof data !== "object") return;
+    const info = data.info && typeof data.info === "object" ? data.info : null;
+    const foreign = info && info.videoData && info.videoData.video_id;
+    if (foreign && foreign !== video.id) {
+      const allowed = videos().find((item) => item.id === foreign);
+      const next = allowed || upNext(video)[0];
+      if (next && next.id !== video.id) show(pageHref(next));
+      return;
+    }
+    const state = data.event === "onStateChange" ? data.info : (info ? info.playerState : undefined);
+    if (state === 1 || state === 2 || state === 0) markPlaying(state === 1);
+    if (state !== 0) return;
+    const next = upNext(video)[0];
+    if (next) show(pageHref(next));
+  };
+  window.addEventListener("message", playerWatch);
 }
 
 function viewsLabel(video) {
@@ -679,7 +752,7 @@ function renderWatch(video) {
   label.className = "upnext-label";
   label.textContent = "下一部";
   side.append(label);
-  for (const item of queueAfter(video).slice(0, 30)) {
+  for (const item of upNext(video)) {
     const row = link(pageHref(item), "upnext-row");
     const image = document.createElement("img");
     image.alt = "";
@@ -830,7 +903,31 @@ searchForm.addEventListener("submit", (event) => {
   event.preventDefault();
   goSearch();
 });
-window.addEventListener("hashchange", render);
+function show(hash) {
+  const next = hash || "#/";
+  const current = location.hash || "#/";
+  if (current !== next) {
+    ignoreHash = true;
+    location.hash = next;
+    ignoreHash = false;
+  }
+  render();
+  if (next.startsWith("#/watch/")) window.scrollTo(0, 0);
+}
+
+document.addEventListener("click", (event) => {
+  const anchor = event.target.closest("a");
+  if (!anchor || anchor.classList.contains("logo")) return;
+  const href = anchor.getAttribute("href") || "";
+  if (!href.startsWith("#")) return;
+  event.preventDefault();
+  show(href);
+});
+
+window.addEventListener("hashchange", () => {
+  if (ignoreHash) return;
+  render();
+});
 
 function fitHeight() {
   const vv = window.visualViewport;
@@ -861,7 +958,7 @@ window.addEventListener("pageshow", pinViewport);
 if (window.visualViewport) window.visualViewport.addEventListener("resize", pinViewport);
 pinViewport();
 
-fetch("catalog.json?v=4", { cache: "no-cache" })
+fetch("catalog.json?v=5", { cache: "no-cache" })
   .then((res) => {
     if (!res.ok) throw new Error(String(res.status));
     return res.json();
