@@ -378,6 +378,7 @@ main { flex: 1; min-width: 0; margin-left: var(--guide); }
   border: 0;
 }
 
+#yt-host:not(.yt-float),
 iframe.yt-hidden {
   position: fixed;
   left: 0;
@@ -399,6 +400,8 @@ iframe.yt-float {
   height: auto;
   aspect-ratio: 16 / 9;
   border: 0;
+  opacity: 1;
+  pointer-events: auto;
   background: #000;
 }
 

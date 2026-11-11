@@ -359,25 +359,28 @@ let notedWatchId = "";
 let watching = null;
 let wantedId = "";
 let seenWanted = false;
-let advancedFrom = "";
 let paintedHash = "";
 let pendingTap = "";
+let yt = null;
+let playerReady = false;
+let apiFailed = false;
+let suppressEnd = false;
+let lastPlayId = "";
+let lastPlayAt = 0;
+let fallbackFrame = null;
+let cuedRetry = "";
+let bootId = "";
+const badBoot = new Set();
 
-const shell = document.createElement("iframe");
-shell.id = "yt-player";
-shell.name = "yt-player";
-shell.title = "播放";
-shell.className = "yt-hidden";
-shell.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
-shell.allowFullscreen = true;
-shell.setAttribute("playsinline", "1");
+const host = document.createElement("div");
+host.id = "yt-host";
 const titleShield = document.createElement("div");
 titleShield.className = "yt-shield";
 titleShield.hidden = true;
 const logoShield = document.createElement("div");
 logoShield.className = "yt-shield";
 logoShield.hidden = true;
-document.body.append(shell, titleShield, logoShield);
+document.body.append(host, titleShield, logoShield);
 
 function stopClock() {
   if (!watchClock) return;
@@ -446,37 +449,83 @@ function embedSrc(videoId) {
   return `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?${query}`;
 }
 
-function stopPlayer() {
-  pendingTap = "";
-  shell.className = "yt-hidden";
-  shell.style.cssText = "";
+function playerElement() {
+  if (fallbackFrame) return fallbackFrame;
+  if (!yt || typeof yt.getIframe !== "function") return null;
+  try { return yt.getIframe(); } catch (error) { return null; }
+}
+
+function ensureFallback() {
+  if (fallbackFrame) return fallbackFrame;
+  fallbackFrame = document.createElement("iframe");
+  fallbackFrame.id = "yt-player";
+  fallbackFrame.title = "播放";
+  fallbackFrame.className = "yt-hidden";
+  fallbackFrame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+  fallbackFrame.allowFullscreen = true;
+  fallbackFrame.setAttribute("playsinline", "1");
+  document.body.append(fallbackFrame);
+  return fallbackFrame;
+}
+
+function currentVideoId() {
+  if (!playerReady || !yt || typeof yt.getVideoData !== "function") return "";
+  try {
+    const data = yt.getVideoData();
+    return (data && data.video_id) || "";
+  } catch (error) {
+    return "";
+  }
+}
+
+function hideFrame() {
+  const frame = playerElement();
+  if (frame) {
+    frame.className = "yt-hidden";
+    frame.style.cssText = "";
+  }
   titleShield.hidden = true;
   logoShield.hidden = true;
-  shell.src = "about:blank";
-  shell.dataset.video = "";
-  shell.dataset.scripted = "";
+}
+
+function stopPlayer() {
+  pendingTap = "";
+  suppressEnd = true;
   watching = null;
   wantedId = "";
   seenWanted = false;
+  hideFrame();
+  if (fallbackFrame) fallbackFrame.src = "about:blank";
+  if (playerReady && yt && typeof yt.stopVideo === "function") {
+    try { yt.stopVideo(); } catch (error) { /* 播放器已經停了 */ }
+  }
 }
 
 function alignPlayer() {
-  const frame = document.querySelector(".watch .frame");
-  shell.className = "yt-float";
+  const frame = playerElement();
   if (!frame) {
-    shell.style.cssText = "";
     titleShield.hidden = true;
     logoShield.hidden = true;
-    void shell.offsetWidth;
     return;
   }
-  const box = frame.getBoundingClientRect();
-  shell.style.top = box.top + "px";
-  shell.style.left = box.left + "px";
-  shell.style.width = box.width + "px";
-  shell.style.height = box.height + "px";
-  shell.style.right = "auto";
-  shell.style.borderRadius = getComputedStyle(frame).borderRadius;
+  const slot = document.querySelector(".watch .frame");
+  frame.className = "yt-float";
+  if (!slot) {
+    frame.style.cssText = "";
+    titleShield.hidden = true;
+    logoShield.hidden = true;
+    void frame.offsetWidth;
+    return;
+  }
+  const box = slot.getBoundingClientRect();
+  frame.style.top = box.top + "px";
+  frame.style.left = box.left + "px";
+  frame.style.width = box.width + "px";
+  frame.style.height = box.height + "px";
+  frame.style.right = "auto";
+  frame.style.opacity = "1";
+  frame.style.pointerEvents = "auto";
+  frame.style.borderRadius = getComputedStyle(slot).borderRadius;
   titleShield.hidden = false;
   logoShield.hidden = false;
   titleShield.style.top = box.top + "px";
@@ -487,12 +536,43 @@ function alignPlayer() {
   logoShield.style.left = (box.right - 148) + "px";
   logoShield.style.width = "148px";
   logoShield.style.height = "64px";
+  void frame.offsetWidth;
 }
 
-function revealPlayer() {
-  const frame = document.querySelector(".watch .frame");
-  if (frame && frame.getBoundingClientRect().height > 40 && shell.classList.contains("yt-float")) return;
-  alignPlayer();
+function playNow(videoId) {
+  if (!videoId) return;
+  const now = Date.now();
+  if (lastPlayId === videoId && now - lastPlayAt < 700) return;
+  lastPlayId = videoId;
+  lastPlayAt = now;
+  wantedId = videoId;
+  seenWanted = false;
+  suppressEnd = true;
+  if (apiFailed) {
+    pendingTap = "";
+    const frame = ensureFallback();
+    frame.title = (watching && watching.title) || "播放";
+    frame.src = embedSrc(videoId);
+    alignPlayer();
+    return;
+  }
+  if (!playerReady || !yt || typeof yt.loadVideoById !== "function") {
+    pendingTap = videoId;
+    lastPlayAt = 0;
+    return;
+  }
+  pendingTap = "";
+  cuedRetry = "";
+  const frame = playerElement();
+  if (frame) frame.title = (watching && watching.title) || "播放";
+  try {
+    yt.unMute();
+    yt.setVolume(100);
+    yt.loadVideoById({ videoId: videoId, startSeconds: 0 });
+    yt.playVideo();
+  } catch (error) {
+    pendingTap = videoId;
+  }
 }
 
 function mountPlayer(video) {
@@ -501,71 +581,140 @@ function mountPlayer(video) {
     seenWanted = false;
     wantedId = video.id;
   }
-  shell.title = video.title || "播放";
+  const frame = playerElement();
+  if (frame) frame.title = video.title || "播放";
   alignPlayer();
   startClock(video.id);
-  const src = shell.src || "";
-  const landed = src.includes("/embed/" + video.id);
-  shell.dataset.video = video.id;
-  if (landed || pendingTap === video.id) {
-    shell.dataset.scripted = pendingTap === video.id ? "0" : shell.dataset.scripted || "0";
-    pendingTap = "";
-    return;
-  }
-  shell.dataset.scripted = "1";
-  shell.src = embedSrc(video.id);
+  if (pendingTap === video.id) return;
+  if (currentVideoId() === video.id) return;
+  playNow(video.id);
 }
 
-shell.addEventListener("load", () => {
-  if (!shell.contentWindow) return;
-  try {
-    const href = shell.contentWindow.location.href;
-    if (!href || href === "about:blank") return;
-  } catch (error) {
-    // 已經進到 YouTube，讀不到網址才是正常的。
+function onPlayerReady() {
+  playerReady = true;
+  const frame = playerElement();
+  if (frame) {
+    frame.title = "播放";
+    frame.setAttribute("allow", "autoplay; encrypted-media; picture-in-picture; fullscreen");
+    frame.setAttribute("playsinline", "1");
+    frame.allowFullscreen = true;
+    frame.className = watching ? "yt-float" : "yt-hidden";
   }
-  shell.contentWindow.postMessage(JSON.stringify({
-    event: "listening",
-    id: "yt-player",
-    channel: "widget",
-  }), "*");
-});
+  try { yt.mute(); } catch (error) { /* 待命時先消音，點下去才打開聲音 */ }
+  if (watching) alignPlayer();
+  if (pendingTap) playNow(pendingTap);
+}
 
-window.addEventListener("message", (event) => {
-  const origin = event.origin || "";
-  if (!/^https:\/\/([a-z0-9-]+\.)?(youtube\.com|youtube-nocookie\.com)$/.test(origin)) return;
+function goNext(next) {
+  if (!next || !watching || next.id === wantedId) return;
+  suppressEnd = true;
+  playNow(next.id);
+  show(pageHref(next));
+}
+
+function onPlayerState(event) {
   if (!watching) return;
-  let data = event.data;
-  if (typeof data === "string") {
-    try { data = JSON.parse(data); } catch (error) { return; }
-  }
-  if (!data || typeof data !== "object") return;
-  const info = data.info && typeof data.info === "object" ? data.info : null;
-  const foreign = info && typeof info.videoData === "object" && info.videoData ? info.videoData.video_id : "";
-  if (foreign && foreign === wantedId) seenWanted = true;
-  const rawState = data.event === "onStateChange" ? data.info : (info ? info.playerState : undefined);
-  const state = Number(rawState);
+  const state = Number(event.data);
   if (!Number.isFinite(state)) return;
+  let foreign = "";
+  try {
+    const data = yt.getVideoData();
+    foreign = (data && data.video_id) || "";
+  } catch (error) {
+    foreign = "";
+  }
+  if (foreign && foreign === wantedId) seenWanted = true;
+  if ((state === 5 || state === -1) && foreign === wantedId && cuedRetry !== wantedId) {
+    cuedRetry = wantedId;
+    try {
+      yt.unMute();
+      yt.setVolume(100);
+      yt.playVideo();
+    } catch (error) { /* 這次沒播起來，海報上還能再點 */ }
+  }
+  if (state === 1 || state === 3) suppressEnd = false;
   if ((state === 1 || state === 2 || state === 0) && (!foreign || foreign === wantedId)) {
     markPlaying(state === 1);
   }
   if (state === 1 && seenWanted && foreign && foreign !== wantedId) {
     const allowed = videos().find((item) => item.id === foreign);
-    const next = allowed || upNext(watching)[0];
-    if (!next || next.id === wantedId) return;
-    advancedFrom = wantedId;
-    shell.src = embedSrc(next.id);
-    show(pageHref(next));
+    goNext(allowed || upNext(watching)[0]);
     return;
   }
-  if (state !== 0 || advancedFrom === wantedId) return;
+  if (state !== 0 || suppressEnd) return;
   if (foreign && foreign !== wantedId) return;
-  const next = upNext(watching)[0];
-  if (!next || next.id === wantedId) return;
-  advancedFrom = wantedId;
-  shell.src = embedSrc(next.id);
-  show(pageHref(next));
-});
+  goNext(upNext(watching)[0]);
+}
+
+function onPlayerError(event) {
+  const code = Number(event.data);
+  if (watching || pendingTap) return;
+  if (code !== 101 && code !== 150 && code !== 153) return;
+  if (badBoot.size > 8) return;
+  badBoot.add(bootId);
+  const next = videos().find((item) => item.id && !badBoot.has(item.id));
+  if (!next || !yt || typeof yt.cueVideoById !== "function") return;
+  bootId = next.id;
+  try { yt.cueVideoById(next.id); } catch (error) { /* 換一支能嵌入的片子待命 */ }
+}
+
+function ensurePlayer(videoId) {
+  if (!videoId || yt || apiFailed) return;
+  bootId = videoId;
+  if (window.YT && window.YT.Player) createPlayer();
+}
+
+function createPlayer() {
+  if (yt || apiFailed || !bootId || !window.YT || !window.YT.Player) return;
+  yt = new window.YT.Player("yt-host", {
+    videoId: bootId,
+    host: "https://www.youtube.com",
+    width: "1",
+    height: "1",
+    playerVars: {
+      autoplay: 0,
+      playsinline: 1,
+      rel: 0,
+      modestbranding: 1,
+      fs: 1,
+      iv_load_policy: 3,
+      origin: location.origin,
+      enablejsapi: 1,
+    },
+    events: {
+      onReady: onPlayerReady,
+      onStateChange: onPlayerState,
+      onError: onPlayerError,
+    },
+  });
+}
+
+function bootYouTube() {
+  if (window.YT && window.YT.Player) {
+    createPlayer();
+    return;
+  }
+  const previous = window.onYouTubeIframeAPIReady;
+  window.onYouTubeIframeAPIReady = function () {
+    if (typeof previous === "function") previous();
+    createPlayer();
+  };
+  const tag = document.createElement("script");
+  tag.src = "https://www.youtube.com/iframe_api";
+  tag.async = true;
+  tag.onerror = () => {
+    apiFailed = true;
+    if (pendingTap) playNow(pendingTap);
+  };
+  document.head.append(tag);
+  window.setTimeout(() => {
+    if (playerReady || apiFailed) return;
+    apiFailed = true;
+    if (pendingTap) playNow(pendingTap);
+  }, 8000);
+}
+
+bootYouTube();
 
 function viewsLabel(video) {
   const views = (video.views || "").trim();
@@ -847,6 +996,7 @@ function render() {
   renderGuide(route);
   renderTabs(route);
   const all = videos();
+  if (all[0]) ensurePlayer(all[0].id);
   const picked = route.name === "watch" ? all.find((item) => item.id === route.id) : null;
   if (!picked) stopPlayer();
   main.replaceChildren();
@@ -983,40 +1133,21 @@ function show(hash) {
   if (next.startsWith("#/watch/")) window.scrollTo(0, 0);
 }
 
-function armWatchLink(anchor) {
-  const href = anchor.getAttribute("href") || "";
-  if (!href.startsWith("#/watch/") || anchor.dataset.watch) return;
-  const videoId = watchIdFromHref(href);
-  if (!videoId) return;
-  anchor.dataset.watch = href;
-  anchor.href = embedSrc(videoId);
-  anchor.target = "yt-player";
-}
-
-document.addEventListener("pointerdown", (event) => {
-  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-  const anchor = event.target.closest("a");
-  if (!anchor || anchor.classList.contains("logo")) return;
-  armWatchLink(anchor);
-}, true);
-
 document.addEventListener("click", (event) => {
   const anchor = event.target.closest("a");
   if (!anchor || anchor.classList.contains("logo")) return;
   const href = anchor.getAttribute("href") || "";
-  const watch = anchor.dataset.watch || (href.startsWith("#/watch/") ? href : "");
+  if (!href.startsWith("#")) return;
   const plain = event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
-  const videoId = plain ? watchIdFromHref(watch) : "";
+  if (!plain) return;
+  event.preventDefault();
+  const videoId = watchIdFromHref(href);
   if (videoId) {
-    // 留給瀏覽器自己把這一下點擊送進播放器。程式事後再設網址，手機就不准有聲開播。
-    if (!anchor.dataset.watch) armWatchLink(anchor);
-    revealPlayer();
     pendingTap = videoId;
-    setTimeout(() => show(watch), 0);
+    show(href);
+    playNow(videoId);
     return;
   }
-  if (!href.startsWith("#")) return;
-  event.preventDefault();
   show(href);
 });
 
